@@ -105,6 +105,8 @@ export interface ExpenseRecord {
   approvedBy: string;
 }
 
+export type RecurrenceType = 'none' | 'daily' | 'weekly_days' | 'weekdays' | 'weekends';
+
 export interface TrainingClassSession {
   id: string;
   title: string;
@@ -119,6 +121,9 @@ export interface TrainingClassSession {
   isSocialProgram?: boolean;
   location: string;
   description?: string;
+  recurrenceId?: string; // Grouping ID for recurring series
+  recurrencePattern?: string; // e.g. "ทุกวัน จ., พ., ศ. (17:00 - 18:30)"
+  isRecurring?: boolean;
 }
 
 export type MedalType = 'gold' | 'silver' | 'bronze' | 'participant' | 'none';

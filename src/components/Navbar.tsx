@@ -119,16 +119,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </div>
 
-            {/* Quick Edit Branding button for Admin */}
-            {currentUser.role === 'admin' && onOpenBrandingSettings && (
+            {/* Quick Edit Branding button */}
+            {onOpenBrandingSettings && (
               <button
                 type="button"
                 onClick={onOpenBrandingSettings}
-                className="hidden md:inline-flex p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-800/80 transition-colors"
-                title="เปลี่ยนชื่อโรงยิมและโลโก้ (Change App Name & Logo)"
+                className="inline-flex items-center px-2 py-1.5 rounded-lg text-slate-400 hover:text-amber-400 bg-slate-800/40 hover:bg-slate-800 border border-slate-700/60 hover:border-amber-500/40 transition-all text-xs shrink-0"
+                title="เปลี่ยนชื่อแอปและโลโก้ (Change App Name & Logo)"
                 id="edit-branding-quick-btn"
               >
-                <Edit3 className="w-3.5 h-3.5" />
+                <Palette className="w-3.5 h-3.5 text-amber-400 sm:mr-1.5" />
+                <span className="hidden md:inline text-[11px] font-semibold">เปลี่ยนชื่อ & โลโก้</span>
               </button>
             )}
           </div>

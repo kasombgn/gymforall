@@ -1,6 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { TrainingClassSession, AttendanceRecord, Coach, Member, DisciplineType, GymUser } from '../types/gym';
 import { formatThaiDate } from '../utils/storage';
+import { WeeklyTimetable } from './WeeklyTimetable';
+import { 
+  DAY_OPTIONS, 
+  POPULAR_CLASS_PRESETS, 
+  computeRecurringDates, 
+  formatSelectedDaysSummary, 
+  ClassSchedulePreset 
+} from '../utils/scheduleHelpers';
 import { 
   Calendar as CalendarIcon, 
   ChevronLeft, 
@@ -15,7 +23,15 @@ import {
   Sparkles, 
   X,
   Dumbbell,
-  Lock
+  Lock,
+  Repeat,
+  CalendarDays,
+  CalendarRange,
+  Layers,
+  Trash2,
+  AlertCircle,
+  Flame,
+  Check
 } from 'lucide-react';
 
 interface CalendarViewProps {
@@ -24,8 +40,10 @@ interface CalendarViewProps {
   coaches: Coach[];
   members: Member[];
   onAddClass: (session: Omit<TrainingClassSession, 'id' | 'enrolledMemberIds'>) => void;
+  onAddMultipleClasses?: (sessions: Array<Omit<TrainingClassSession, 'id' | 'enrolledMemberIds'>>) => void;
   onOpenCheckInForClass: (session: TrainingClassSession) => void;
   onDeleteClass: (classId: string) => void;
+  onDeleteClassSeries?: (recurrenceId: string) => void;
   currentUser?: GymUser;
 }
 
@@ -45,10 +63,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   coaches,
   members,
   onAddClass,
+  onAddMultipleClasses,
   onOpenCheckInForClass,
   onDeleteClass,
+  onDeleteClassSeries,
   currentUser
 }) => {
+  // View toggle: Monthly/Daily Calendar vs Weekly Timetable
+  const [viewMode, setViewMode] = useState<'calendar' | 'weekly_timetable'>('calendar');
+
   const [currentYear, setCurrentYear] = useState<number>(2026);
   const [currentMonth, setCurrentMonth] = useState<number>(8); // 0-indexed: 8 is September
   const [selectedDateStr, setSelectedDateStr] = useState<string>('2026-09-20');
@@ -69,6 +92,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [formLocation, setFormLocation] = useState('เวทีมวยหลัก 1');
   const [formIsSocial, setFormIsSocial] = useState(false);
   const [formDescription, setFormDescription] = useState('');
+
+  // Repeatable / Recurring Schedule state
+  const [scheduleMode, setScheduleMode] = useState<'single' | 'repeat'>('single');
+  const [selectedDays, setSelectedDays] = useState<number[]>([1, 3, 5]); // Default: Mon, Wed, Fri
+  const [repeatDurationWeeks, setRepeatDurationWeeks] = useState<number>(4); // Default: 4 weeks (~1 month)
+  const [repeatEndMode, setRepeatEndMode] = useState<'weeks' | 'date'>('weeks');
+  const [repeatCustomEndDate, setRepeatCustomEndDate] = useState<string>('2026-10-31');
+
+  // Series deletion confirmation modal
+  const [deletingClass, setDeletingClass] = useState<TrainingClassSession | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   // Synchronize coachId when modal opens or user changes
   useEffect(() => {
@@ -104,7 +138,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   };
 
-  const openAddModal = (dateStr?: string) => {
+  // Compute preview dates for recurring schedule
+  const previewRecurringDates = useMemo(() => {
+    if (scheduleMode !== 'repeat') return [formDate];
+    return computeRecurringDates(
+      formDate,
+      selectedDays,
+      repeatDurationWeeks,
+      repeatCustomEndDate,
+      repeatEndMode
+    );
+  }, [scheduleMode, formDate, selectedDays, repeatDurationWeeks, repeatCustomEndDate, repeatEndMode]);
+
+  const openAddModal = (dateStr?: string, defaultDays?: number[], defaultMode: 'single' | 'repeat' = 'single') => {
     const targetDate = dateStr || selectedDateStr;
     setFormDate(targetDate);
     setFormTitle('มวยไทยรอบเย็น (Evening Muay Thai)');
@@ -116,28 +162,135 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setFormLocation('เวทีมวยหลัก 1');
     setFormIsSocial(false);
     setFormDescription('');
+    setScheduleMode(defaultMode);
+
+    if (defaultDays && defaultDays.length > 0) {
+      setSelectedDays(defaultDays);
+      setScheduleMode('repeat');
+    } else {
+      // Default to day of week of target date
+      const [y, m, d] = targetDate.split('-').map(Number);
+      const dayNum = new Date(y, m - 1, d).getDay();
+      setSelectedDays([dayNum]);
+    }
+
     setIsAddClassModalOpen(true);
+  };
+
+  const applyPreset = (preset: ClassSchedulePreset) => {
+    setFormTitle(preset.title);
+    setFormDiscipline(preset.discipline);
+    setFormStartTime(preset.startTime);
+    setFormEndTime(preset.endTime);
+    setFormCapacity(preset.capacity);
+    setFormLocation(preset.location);
+    setFormDescription(preset.description);
+    setSelectedDays(preset.selectedDays);
+    setScheduleMode('repeat');
+  };
+
+  const toggleDaySelection = (dayNum: number) => {
+    setSelectedDays(prev => 
+      prev.includes(dayNum) 
+        ? prev.filter(d => d !== dayNum) 
+        : [...prev, dayNum]
+    );
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const coach = coaches.find(c => c.id === formCoachId);
+    const coachName = coach?.name || 'โค้ชประจำ';
 
-    onAddClass({
-      title: formTitle,
-      discipline: formDiscipline,
-      coachId: formCoachId,
-      coachName: coach?.name || 'โค้ชประจำ',
-      date: formDate,
-      startTime: formStartTime,
-      endTime: formEndTime,
-      maxCapacity: Number(formCapacity),
-      isSocialProgram: formIsSocial,
-      location: formLocation,
-      description: formDescription || undefined
-    });
+    if (scheduleMode === 'repeat') {
+      const datesToCreate = computeRecurringDates(
+        formDate,
+        selectedDays,
+        repeatDurationWeeks,
+        repeatCustomEndDate,
+        repeatEndMode
+      );
+
+      if (datesToCreate.length === 0) {
+        alert('กรุณาเลือกวันในสัปดาห์อย่างน้อย 1 วันเพื่อสร้างตารางเรียนซ้ำ');
+        return;
+      }
+
+      const recurrenceId = `series-${Date.now()}`;
+      const recurrencePattern = `${formatSelectedDaysSummary(selectedDays)} (${formStartTime} - ${formEndTime})`;
+
+      const newSessions: Array<Omit<TrainingClassSession, 'id' | 'enrolledMemberIds'>> = datesToCreate.map(d => ({
+        title: formTitle,
+        discipline: formDiscipline,
+        coachId: formCoachId,
+        coachName,
+        date: d,
+        startTime: formStartTime,
+        endTime: formEndTime,
+        maxCapacity: Number(formCapacity),
+        isSocialProgram: formIsSocial,
+        location: formLocation,
+        description: formDescription || undefined,
+        recurrenceId,
+        recurrencePattern,
+        isRecurring: true
+      }));
+
+      if (onAddMultipleClasses) {
+        onAddMultipleClasses(newSessions);
+      } else {
+        newSessions.forEach(s => onAddClass(s));
+      }
+    } else {
+      // Single class session
+      onAddClass({
+        title: formTitle,
+        discipline: formDiscipline,
+        coachId: formCoachId,
+        coachName,
+        date: formDate,
+        startTime: formStartTime,
+        endTime: formEndTime,
+        maxCapacity: Number(formCapacity),
+        isSocialProgram: formIsSocial,
+        location: formLocation,
+        description: formDescription || undefined,
+        isRecurring: false
+      });
+    }
 
     setIsAddClassModalOpen(false);
+  };
+
+  const handlePromptDelete = (cls: TrainingClassSession) => {
+    if (cls.recurrenceId) {
+      setDeletingClass(cls);
+      setIsDeleteModalOpen(true);
+    } else {
+      if (window.confirm(`ต้องการลบคลาส "${cls.title}" (วันที่ ${formatThaiDate(cls.date)}) ใช่หรือไม่?`)) {
+        onDeleteClass(cls.id);
+      }
+    }
+  };
+
+  const handleDeleteSingleInstance = () => {
+    if (deletingClass) {
+      onDeleteClass(deletingClass.id);
+      setIsDeleteModalOpen(false);
+      setDeletingClass(null);
+    }
+  };
+
+  const handleDeleteEntireSeries = () => {
+    if (deletingClass?.recurrenceId && onDeleteClassSeries) {
+      onDeleteClassSeries(deletingClass.recurrenceId);
+      setIsDeleteModalOpen(false);
+      setDeletingClass(null);
+    } else if (deletingClass) {
+      onDeleteClass(deletingClass.id);
+      setIsDeleteModalOpen(false);
+      setDeletingClass(null);
+    }
   };
 
   // Selected date data
@@ -147,29 +300,67 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   return (
     <div className="space-y-6 pb-12" id="calendar-view-container">
       
-      {/* Header */}
+      {/* Header & View Mode Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight flex items-center">
             <CalendarIcon className="w-6 h-6 mr-2 text-amber-400" />
-            ปฏิทินกิจกรรมการฝึกสอน & ยอดผู้เรียนรายวัน
+            ปฏิทินกิจกรรม & ตารางคลาสฝึกซ้อม (Class Schedules)
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            ตารางคลาสฝึกศิลปะการต่อสู้ ครูผู้สอน สถานที่ฝึก และยอดผู้เข้าเรียนในแต่ละวัน
+            ตารางคลาสฝึกศิลปะการต่อสู้ ครูผู้สอน สถานที่ฝึก และระบบสร้างตารางประจำสัปดาห์อัตโนมัติ
           </p>
         </div>
 
-        <button
-          onClick={() => openAddModal()}
-          className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md transition-all active:scale-95"
-          id="add-class-schedule-btn"
-        >
-          <Plus className="w-4 h-4 mr-1.5" />
-          เพิ่มตารางคลาสฝึกซ้อม
-        </button>
+        <div className="flex items-center space-x-2.5">
+          {/* View Mode Toggle */}
+          <div className="inline-flex bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`inline-flex items-center px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                viewMode === 'calendar'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <CalendarDays className="w-3.5 h-3.5 mr-1.5" />
+              ปฏิทินรายวัน & รายเดือน
+            </button>
+            <button
+              onClick={() => setViewMode('weekly_timetable')}
+              className={`inline-flex items-center px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                viewMode === 'weekly_timetable'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 mr-1.5" />
+              ตารางประจำสัปดาห์
+            </button>
+          </div>
+
+          <button
+            onClick={() => openAddModal()}
+            className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md transition-all active:scale-95"
+            id="add-class-schedule-btn"
+          >
+            <Plus className="w-4 h-4 mr-1.5" />
+            เพิ่มคลาสเรียน
+          </button>
+        </div>
       </div>
 
-      {/* Main Grid: Calendar on Left, Selected Day Details on Right */}
+      {viewMode === 'weekly_timetable' ? (
+        <WeeklyTimetable
+          classes={classes}
+          coaches={coaches}
+          onOpenAddClassForDay={(dayNum) => openAddModal(undefined, [dayNum], 'repeat')}
+          onOpenCheckInForClass={onOpenCheckInForClass}
+          onPromptDelete={handlePromptDelete}
+          currentUser={currentUser}
+        />
+      ) : (
+      /* Main Grid: Calendar on Left, Selected Day Details on Right */
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Left: Interactive Monthly Calendar (7 cols on large screens) */}
@@ -374,6 +565,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                 ฟรีเพื่อสังคม (CSR)
                               </span>
                             )}
+                            {cls.recurrenceId && (
+                              <span 
+                                className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center"
+                                title={cls.recurrencePattern || 'คลาสประจำตามตาราง'}
+                              >
+                                <Repeat className="w-2.5 h-2.5 mr-0.5" />
+                                คลาสประจำ
+                              </span>
+                            )}
                           </div>
                           <span className="text-amber-400 font-medium block mt-0.5">{cls.discipline}</span>
                         </div>
@@ -414,13 +614,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             เช็คอินเข้าเรียน
                           </button>
                           <button
-                            onClick={() => {
-                              if (window.confirm(`ต้องการลบคลาส "${cls.title}" ใช่หรือไม่?`)) {
-                                onDeleteClass(cls.id);
-                              }
-                            }}
-                            className="p-1 rounded text-slate-500 hover:text-red-400"
-                            title="ลบคลาสนี้"
+                            onClick={() => handlePromptDelete(cls)}
+                            className="p-1 rounded text-slate-500 hover:text-red-400 transition-colors"
+                            title={cls.recurrenceId ? 'จัดการลบคลาสนี้หรือลบทั้งตาราง' : 'ลบคลาสนี้'}
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -467,16 +663,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
 
       </div>
+      )}
 
-      {/* Add Class Schedule Modal */}
+      {/* Add Class Schedule Modal (Supports Single Session & Repeatable Schedule) */}
       {isAddClassModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="relative w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
             
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/80">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/90">
               <h3 className="text-base font-bold text-white flex items-center">
                 <CalendarIcon className="w-4 h-4 mr-2 text-amber-400" />
-                เพิ่มตารางคลาสฝึกซ้อมใหม่ในปฏิทิน
+                เพิ่มตารางคลาสฝึกซ้อม (Class Schedule)
               </h3>
               <button onClick={() => setIsAddClassModalOpen(false)} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
@@ -484,6 +681,63 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
 
             <form onSubmit={handleFormSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+              
+              {/* Schedule Mode Selector Tabs: Single vs Repeatable */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1.5">
+                  รูปแบบการจัดตารางเวลา *
+                </label>
+                <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode('single')}
+                    className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center transition-all ${
+                      scheduleMode === 'single'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <CalendarDays className="w-3.5 h-3.5 mr-1.5" />
+                    คลาสครั้งเดียว (Single Date)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode('repeat')}
+                    className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center transition-all ${
+                      scheduleMode === 'repeat'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Repeat className="w-3.5 h-3.5 mr-1.5" />
+                    ทำซ้ำตามตาราง (Repeatable Schedule)
+                  </button>
+                </div>
+              </div>
+
+              {/* Popular Presets Quick Selector */}
+              <div className="bg-slate-950/70 border border-slate-800 p-3 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300 font-semibold flex items-center text-[11px]">
+                    <Flame className="w-3.5 h-3.5 mr-1 text-amber-400" />
+                    เทมเพลตยอดนิยม (คลิกเดียวตั้งค่าพร้อมวันและเวลา)
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {POPULAR_CLASS_PRESETS.map(preset => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => applyPreset(preset)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-[11px] transition-colors flex items-center"
+                    >
+                      <Sparkles className="w-3 h-3 mr-1 text-amber-400" />
+                      {preset.title.split(' ')[0]} ({preset.startTime})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">ชื่อคลาสการฝึกสอน *</label>
                 <input
@@ -553,18 +807,198 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">วันที่สอน *</label>
-                  <input
-                    type="date"
-                    required
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 text-white"
-                  />
+              {/* Repeatable Configuration Section (Shown when scheduleMode === 'repeat') */}
+              {scheduleMode === 'repeat' && (
+                <div className="bg-amber-950/20 border border-amber-500/30 rounded-xl p-4 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300 text-xs flex items-center">
+                      <Repeat className="w-3.5 h-3.5 mr-1.5" />
+                      ตั้งค่าวันและระยะเวลาทำซ้ำ (Repeat Schedule Settings)
+                    </span>
+                    <span className="text-[10px] text-amber-400/80 font-mono">
+                      ระบบจะสร้างคลาสล่วงหน้าอัตโนมัติ
+                    </span>
+                  </div>
+
+                  {/* Day of Week Selector */}
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1.5">
+                      เลือกวันในสัปดาห์ที่เปิดสอน *
+                    </label>
+                    <div className="grid grid-cols-7 gap-1">
+                      {DAY_OPTIONS.map(d => {
+                        const isSelected = selectedDays.includes(d.day);
+                        return (
+                          <button
+                            key={`select-day-${d.day}`}
+                            type="button"
+                            onClick={() => toggleDaySelection(d.day)}
+                            className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all border ${
+                              isSelected
+                                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                                : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600 hover:text-white'
+                            }`}
+                          >
+                            <span className="block text-[11px] leading-tight">{d.short}</span>
+                            <span className="text-[9px] opacity-75 font-normal">{d.en}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Quick Day Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-slate-500">เลือกด่วน:</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDays([1, 2, 3, 4, 5])}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                      >
+                        จ.-ศ. (วันธรรมดา)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDays([1, 3, 5])}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                      >
+                        จ., พ., ศ.
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDays([2, 4, 6])}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                      >
+                        อ., พฤ., ส.
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDays([6, 0])}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                      >
+                        ส.-อา. (สุดสัปดาห์)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDays([0, 1, 2, 3, 4, 5, 6])}
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                      >
+                        ทุกวัน
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Duration Picker */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        วันที่เริ่มต้นรอบตาราง *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formDate}
+                        onChange={(e) => setFormDate(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        ระยะเวลาที่ต้องการสร้างล่วงหน้า
+                      </label>
+                      <select
+                        value={repeatEndMode === 'weeks' ? repeatDurationWeeks : 'custom'}
+                        onChange={(e) => {
+                          if (e.target.value === 'custom') {
+                            setRepeatEndMode('date');
+                          } else {
+                            setRepeatEndMode('weeks');
+                            setRepeatDurationWeeks(Number(e.target.value));
+                          }
+                        }}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white"
+                      >
+                        <option value={1}>1 สัปดาห์ (1 Week)</option>
+                        <option value={2}>2 สัปดาห์ (2 Weeks)</option>
+                        <option value={4}>4 สัปดาห์ (~1 เดือน แนะนำ)</option>
+                        <option value={8}>8 สัปดาห์ (~2 เดือน)</option>
+                        <option value={12}>12 สัปดาห์ (~3 เดือน / 1 ไตรมาส)</option>
+                        <option value="custom">กำหนดวันสิ้นสุดเอง...</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {repeatEndMode === 'date' && (
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        สร้างคลาสจนถึงวันที่ (End Date)
+                      </label>
+                      <input
+                        type="date"
+                        value={repeatCustomEndDate}
+                        onChange={(e) => setRepeatCustomEndDate(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1.5 text-white"
+                      />
+                    </div>
+                  )}
+
+                  {/* Real-time Schedule Generation Preview */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/20 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="text-amber-400 flex items-center">
+                        <Sparkles className="w-3.5 h-3.5 mr-1" />
+                        จะสร้างคลาสทั้งหมด: {previewRecurringDates.length} คลาส
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        {formatSelectedDaysSummary(selectedDays)}
+                      </span>
+                    </div>
+
+                    {previewRecurringDates.length > 0 ? (
+                      <p className="text-[11px] text-slate-400">
+                        ตั้งแต่วันที่ <strong className="text-slate-200">{formatThaiDate(previewRecurringDates[0])}</strong> ถึง <strong className="text-slate-200">{formatThaiDate(previewRecurringDates[previewRecurringDates.length - 1])}</strong>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-red-400 flex items-center">
+                        <AlertCircle className="w-3.5 h-3.5 mr-1 shrink-0" />
+                        กรุณาเลือกวันในสัปดาห์อย่างน้อย 1 วัน
+                      </p>
+                    )}
+
+                    {previewRecurringDates.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1 max-h-16 overflow-y-auto">
+                        {previewRecurringDates.slice(0, 10).map((dStr, idx) => (
+                          <span key={idx} className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 font-mono">
+                            {dStr.slice(5)}
+                          </span>
+                        ))}
+                        {previewRecurringDates.length > 10 && (
+                          <span className="px-1.5 py-0.5 text-[10px] text-slate-500">
+                            +{previewRecurringDates.length - 10} วันถัดไป...
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                 </div>
-                <div>
+              )}
+
+              {/* Time and Capacity Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {scheduleMode === 'single' && (
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">วันที่สอน *</label>
+                    <input
+                      type="date"
+                      required
+                      value={formDate}
+                      onChange={(e) => setFormDate(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 text-white"
+                    />
+                  </div>
+                )}
+                <div className={scheduleMode === 'repeat' ? 'sm:col-span-1' : ''}>
                   <label className="block text-slate-300 font-semibold mb-1">เวลาเริ่ม *</label>
                   <input
                     type="time"
@@ -574,7 +1008,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 text-white"
                   />
                 </div>
-                <div>
+                <div className={scheduleMode === 'repeat' ? 'sm:col-span-1' : ''}>
                   <label className="block text-slate-300 font-semibold mb-1">เวลาสิ้นสุด *</label>
                   <input
                     type="time"
@@ -584,10 +1018,22 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-2 text-white"
                   />
                 </div>
+                {scheduleMode === 'repeat' && (
+                  <div className="sm:col-span-1">
+                    <label className="block text-slate-300 font-semibold mb-1">ความจุผู้เรียน (คน)</label>
+                    <input
+                      type="number"
+                      required
+                      value={formCapacity}
+                      onChange={(e) => setFormCapacity(Number(e.target.value))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className={scheduleMode === 'repeat' ? 'col-span-2' : ''}>
                   <label className="block text-slate-300 font-semibold mb-1">สถานที่ฝึก / โซนยิม *</label>
                   <input
                     type="text"
@@ -598,16 +1044,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">ความจุผู้เรียนสูงสุด (คน)</label>
-                  <input
-                    type="number"
-                    required
-                    value={formCapacity}
-                    onChange={(e) => setFormCapacity(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
+                {scheduleMode === 'single' && (
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">ความจุผู้เรียนสูงสุด (คน)</label>
+                    <input
+                      type="number"
+                      required
+                      value={formCapacity}
+                      onChange={(e) => setFormCapacity(Number(e.target.value))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Social program toggle */}
@@ -645,12 +1093,96 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-md"
+                  disabled={scheduleMode === 'repeat' && previewRecurringDates.length === 0}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold shadow-md transition-all active:scale-95 flex items-center"
                 >
-                  บันทึกลงปฏิทิน
+                  {scheduleMode === 'repeat' ? (
+                    <>
+                      <Repeat className="w-4 h-4 mr-1.5" />
+                      สร้างตารางเรียน {previewRecurringDates.length} คลาสอัตโนมัติ
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 mr-1.5" />
+                      บันทึกลงปฏิทิน
+                    </>
+                  )}
                 </button>
               </div>
             </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* Delete Recurring Class Series Confirmation Modal */}
+      {isDeleteModalOpen && deletingClass && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            
+            <div className="flex items-center space-x-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-950 border border-red-800/80 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  ลบคลาสการฝึกสอน
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  คลาสนี้เป็นส่วนหนึ่งของตารางคลาสประจำ (Recurring)
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
+              <span className="font-bold text-white text-sm block">{deletingClass.title}</span>
+              <p className="text-amber-400 font-mono text-[11px]">
+                {deletingClass.startTime} - {deletingClass.endTime} • {deletingClass.discipline}
+              </p>
+              <p className="text-slate-400 text-[11px]">
+                วันที่เลือก: {formatThaiDate(deletingClass.date)}
+              </p>
+              {deletingClass.recurrencePattern && (
+                <p className="text-slate-500 text-[11px]">
+                  ตารางประจำ: {deletingClass.recurrencePattern}
+                </p>
+              )}
+            </div>
+
+            <p className="text-slate-300">
+              ท่านต้องการลบเฉพาะคลาสในวันที่นี้ หรือต้องการลบคลาสประจำชุดนี้ออกจากตารางทั้งหมด?
+            </p>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleDeleteSingleInstance}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold transition-colors text-left flex items-center justify-between"
+              >
+                <span>🗑️ ลบเฉพาะวันนี้ ({formatThaiDate(deletingClass.date)})</span>
+                <span className="text-[10px] text-slate-400">คลาสอื่นยังคงอยู่</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteEntireSeries}
+                className="w-full py-2.5 px-4 rounded-xl bg-red-900/60 hover:bg-red-800 text-red-200 border border-red-700/80 font-bold transition-colors text-left flex items-center justify-between"
+              >
+                <span>💥 ลบคลาสประจำชุดนี้ทั้งหมด ({classes.filter(c => c.recurrenceId === deletingClass.recurrenceId).length} คลาส)</span>
+                <span className="text-[10px] text-red-300 font-mono">ลบทั้งชุด</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteModalOpen(false);
+                  setDeletingClass(null);
+                }}
+                className="w-full py-2 px-4 rounded-xl text-slate-400 hover:text-white transition-colors text-center"
+              >
+                ยกเลิก
+              </button>
+            </div>
 
           </div>
         </div>

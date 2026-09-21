@@ -11,7 +11,7 @@ import {
   CompetitionRecord,
   GymSettings
 } from './types/gym';
-import { loadGymData, saveGymData, loadCurrentUser, saveCurrentUser } from './utils/storage';
+import { loadGymData, saveGymData, loadCurrentUser, saveCurrentUser, applyImportMembers } from './utils/storage';
 import { Navbar, TabType } from './components/Navbar';
 import { DashboardView } from './components/DashboardView';
 import { MembersView } from './components/MembersView';
@@ -142,6 +142,16 @@ export default function App() {
       ...prev,
       members: prev.members.filter(m => m.id !== memberId)
     }));
+  };
+
+  const handleImportMembers = (importedMembers: Member[], mode: 'merge' | 'append' | 'skip') => {
+    updateGymDatabase(prev => {
+      const updatedMembers = applyImportMembers(prev.members, importedMembers, mode);
+      return {
+        ...prev,
+        members: updatedMembers
+      };
+    });
   };
 
   // 2. Coaches Handlers
@@ -282,10 +292,31 @@ export default function App() {
     }));
   };
 
+  const handleAddMultipleClasses = (classesData: Array<Omit<TrainingClassSession, 'id' | 'enrolledMemberIds'>>) => {
+    const timestamp = Date.now();
+    const newClasses: TrainingClassSession[] = classesData.map((cd, index) => ({
+      ...cd,
+      id: `cls-${timestamp}-${index}`,
+      enrolledMemberIds: []
+    }));
+
+    updateGymDatabase(prev => ({
+      ...prev,
+      classes: [...prev.classes, ...newClasses]
+    }));
+  };
+
   const handleDeleteClass = (classId: string) => {
     updateGymDatabase(prev => ({
       ...prev,
       classes: prev.classes.filter(c => c.id !== classId)
+    }));
+  };
+
+  const handleDeleteClassSeries = (recurrenceId: string) => {
+    updateGymDatabase(prev => ({
+      ...prev,
+      classes: prev.classes.filter(c => c.recurrenceId !== recurrenceId)
     }));
   };
 
@@ -404,6 +435,7 @@ export default function App() {
               }
             }}
             currentUser={currentUser}
+            onOpenBrandingSettings={() => setIsBrandingModalOpen(true)}
           />
         )}
 
@@ -416,6 +448,7 @@ export default function App() {
             onAddMember={handleAddMember}
             onUpdateMember={handleUpdateMember}
             onDeleteMember={handleDeleteMember}
+            onImportMembers={handleImportMembers}
             onOpenCheckInForMember={(mId) => handleOpenCheckIn(mId)}
             onOpenPaymentForMember={handleOpenPaymentForMember}
             onViewReceipt={handleViewReceipt}
@@ -498,8 +531,10 @@ export default function App() {
             coaches={gymData.coaches}
             members={gymData.members}
             onAddClass={handleAddClass}
+            onAddMultipleClasses={handleAddMultipleClasses}
             onOpenCheckInForClass={(cls) => handleOpenCheckIn()}
             onDeleteClass={handleDeleteClass}
+            onDeleteClassSeries={handleDeleteClassSeries}
             currentUser={currentUser}
           />
         )}

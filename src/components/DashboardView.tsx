@@ -18,7 +18,8 @@ import {
   QrCode,
   Calendar as CalendarIcon,
   Clock,
-  UserCheck
+  UserCheck,
+  Palette
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -28,6 +29,7 @@ interface DashboardViewProps {
   onOpenNewPayment: () => void;
   onOpenNewExpense: () => void;
   currentUser?: GymUser;
+  onOpenBrandingSettings?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -36,7 +38,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenCheckIn,
   onOpenNewPayment,
   onOpenNewExpense,
-  currentUser
+  currentUser,
+  onOpenBrandingSettings
 }) => {
   const isCoach = currentUser?.role === 'coach';
   const { members, coaches, payments, expenses, attendance, classes } = gymData;
@@ -113,6 +116,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             >
               <Plus className="w-4 h-4 mr-1.5" />
               บันทึกรายจ่าย
+            </button>
+          )}
+          {onOpenBrandingSettings && !isCoach && (
+            <button
+              onClick={onOpenBrandingSettings}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 transition-all active:scale-95"
+              id="dash-quick-branding-btn"
+              title="เปลี่ยนชื่อโรงยิมและโลโก้"
+            >
+              <Palette className="w-4 h-4 mr-1.5 text-amber-400" />
+              เปลี่ยนชื่อ/โลโก้
             </button>
           )}
         </div>

@@ -25,10 +25,12 @@ import {
   Award,
   Medal,
   Swords,
-  MapPin
+  MapPin,
+  FileSpreadsheet
 } from 'lucide-react';
 import { MemberCardModal } from './MemberCardModal';
 import { CompetitionModal } from './CompetitionModal';
+import { ImportMembersModal } from './ImportMembersModal';
 
 interface MembersViewProps {
   members: Member[];
@@ -38,6 +40,7 @@ interface MembersViewProps {
   onAddMember: (member: Omit<Member, 'id' | 'totalSessionsAttended'>) => void;
   onUpdateMember: (member: Member) => void;
   onDeleteMember: (memberId: string) => void;
+  onImportMembers?: (imported: Member[], mode: 'merge' | 'append' | 'skip') => void;
   onOpenCheckInForMember: (memberId: string) => void;
   onOpenPaymentForMember: (member: Member) => void;
   onViewReceipt: (transaction: PaymentTransaction) => void;
@@ -66,6 +69,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
   onAddMember,
   onUpdateMember,
   onDeleteMember,
+  onImportMembers,
   onOpenCheckInForMember,
   onOpenPaymentForMember,
   onViewReceipt,
@@ -88,6 +92,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [cardModalMember, setCardModalMember] = useState<Member | null>(null);
+  const [isImportCSVModalOpen, setIsImportCSVModalOpen] = useState<boolean>(false);
 
   // Competition Modal state
   const [isCompModalOpen, setIsCompModalOpen] = useState<boolean>(false);
@@ -272,6 +277,16 @@ export const MembersView: React.FC<MembersViewProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setIsImportCSVModalOpen(true)}
+            className="inline-flex items-center justify-center px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm transition-all active:scale-95"
+            id="import-members-csv-top-btn"
+            title="นำเข้าข้อมูลสมาชิกผ่านไฟล์ CSV พร้อมมีแม่แบบให้ดาวน์โหลด"
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-1.5 text-emerald-400" />
+            นำเข้า CSV
+          </button>
+
           <button
             onClick={() => handleOpenAddCompetition()}
             className="inline-flex items-center justify-center px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm transition-all active:scale-95"
@@ -1132,6 +1147,18 @@ export const MembersView: React.FC<MembersViewProps> = ({
         initialRecord={editingComp}
         preselectedMemberId={compPreselectedMemberId}
         currentUser={currentUser}
+      />
+
+      {/* CSV Member Import Modal */}
+      <ImportMembersModal
+        isOpen={isImportCSVModalOpen}
+        onClose={() => setIsImportCSVModalOpen(false)}
+        existingMembers={members}
+        onImportSuccess={(imported, mode) => {
+          if (onImportMembers) {
+            onImportMembers(imported, mode);
+          }
+        }}
       />
 
     </div>

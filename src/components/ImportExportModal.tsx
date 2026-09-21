@@ -1,11 +1,13 @@
 import React, { useRef, useState } from 'react';
-import { GymDatabase } from '../types/gym';
+import { GymDatabase, Member } from '../types/gym';
 import { 
   exportDataAsJSON, 
   importDataFromJSON, 
   exportMembersToCSV, 
   exportFinancialsToCSV, 
   exportAttendanceToCSV, 
+  downloadMemberCSVTemplate,
+  applyImportMembers,
   resetToInitialData 
 } from '../utils/storage';
 import { 
@@ -18,8 +20,11 @@ import {
   AlertCircle, 
   Users, 
   Coins, 
-  CalendarCheck 
+  CalendarCheck,
+  FileSpreadsheet,
+  FileDown
 } from 'lucide-react';
+import { ImportMembersModal } from './ImportMembersModal';
 
 interface ImportExportModalProps {
   isOpen: boolean;
@@ -37,6 +42,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isMemberCSVModalOpen, setIsMemberCSVModalOpen] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -210,7 +216,47 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Reset demo data */}
+          {/* Section 3: CSV Member Import & Template */}
+          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 space-y-3">
+            <div className="flex items-start justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-white flex items-center">
+                  <FileSpreadsheet className="w-4 h-4 mr-1.5 text-emerald-400" />
+                  นำเข้าข้อมูลสมาชิกผ่านไฟล์ CSV (Import Members CSV)
+                </h4>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  เพิ่มสมาชิกใหม่หรืออัปเดตสมาชิกเดิมจำนวนมากพร้อมกันผ่านไฟล์ Excel / CSV
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                แนะนำ
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={downloadMemberCSVTemplate}
+                className="inline-flex items-center px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 transition-all active:scale-95"
+                id="modal-download-template-csv-btn"
+              >
+                <FileDown className="w-3.5 h-3.5 mr-1.5 text-emerald-400" />
+                ดาวน์โหลดไฟล์ Template (.csv)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsMemberCSVModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 text-xs font-bold rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm transition-all active:scale-95"
+                id="open-csv-import-wizard-btn"
+              >
+                <Upload className="w-3.5 h-3.5 mr-1.5" />
+                นำเข้าสมาชิกจากไฟล์ CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Section 4: Reset demo data */}
           <div className="pt-2 flex items-center justify-between border-t border-slate-800">
             <span className="text-xs text-slate-400">ต้องการทดสอบข้อมูลใหม่หรือย้อนกลับค่าเริ่มต้น?</span>
             <button
@@ -226,6 +272,21 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         </div>
 
       </div>
+
+      {/* CSV Member Import Modal */}
+      <ImportMembersModal
+        isOpen={isMemberCSVModalOpen}
+        onClose={() => setIsMemberCSVModalOpen(false)}
+        existingMembers={gymData.members}
+        onImportSuccess={(imported, mode) => {
+          const updated = applyImportMembers(gymData.members, imported, mode);
+          onDataUpdated({
+            ...gymData,
+            members: updated
+          });
+          showSuccess(`นำเข้าข้อมูลสมาชิกสำเร็จแล้ว (${imported.length} คน)`);
+        }}
+      />
     </div>
   );
 };
