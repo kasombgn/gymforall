@@ -1,0 +1,8 @@
+{
+  "name": "ระบบบริหารโรงยิมศิลปะการต่อสู้",
+  "description": "ระบบบริหารโรงยิมฝึกสอนศิลปะการต่อสู้ครบวงจร: สมาชิก, โค้ช, ค่าบริการรายเดือน-รายครั้ง, รายรับ-รายจ่าย, ปฏิทินการฝึก และระบบนำเข้า/ส่งออกข้อมูล",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
